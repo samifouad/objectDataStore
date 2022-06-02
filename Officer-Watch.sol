@@ -9,29 +9,41 @@ pragma experimental ABIEncoderV2;
 // solidity's array allow for easy access to a collection of objects
 contract ObjectDataStore 
 {
-    // structure of data store
-    struct Obj 
+    // structure of data store mapping
+    struct Obj
     {
-        string id;         
-        string objType;   
+        string id;
+        string objType;
         string name;
         string ipfsHash;
         string parent;
         string children;
         bool isSet;
+        uint256 index;
     }
+
+    // structure of data store array
+    struct ObjArray
+    {
+        string id;
+        string objType;
+        string name;
+        string ipfsHash;
+        string parent;
+        string children;
+    }  
  
     // for fast lookup by object id
-    mapping(string => Obj) public objects;
+    mapping(string => Obj) private objects;
 
     // array of objects for collecting all/subset of objects
-    Obj[] public objectsArray;
+    ObjArray[] private objectsArray;
 
     // contract deployer
     address owner;
 
     // access control list
-    mapping(address => bool) acl;
+    mapping(address => bool) private acl;
 
     // initialize smart contract
     constructor()
@@ -57,12 +69,20 @@ contract ObjectDataStore
         _;
     }
 
-    // how contract deployer can add other members to the ACL
+    // how contract deployer can add members to the ACL
     function addUser(address _addressToAccesslist) 
                     public 
                     onlyOwner
     {
         acl[_addressToAccesslist] = true;
+    }
+
+    // how contract deployer can remove members from the ACL
+    function removeUser(address _addressToAccesslist) 
+                    public 
+                    onlyOwner
+    {
+        acl[_addressToAccesslist] = false;
     }
 
     // validates if a specific address is on the ACL
@@ -73,10 +93,6 @@ contract ObjectDataStore
     {
         bool userIsAccesslisted = acl[_accesslistedAddress];
         return userIsAccesslisted;
-    }
-
-    function exampleFunction() public view isAccesslisted(msg.sender) returns(bool){
-    return (true);
     }
 
     // create a new object
@@ -90,6 +106,7 @@ contract ObjectDataStore
                         isAccesslisted(msg.sender) 
                         returns(bool)
     {
+        require (objects[_id].isSet == false, "Object ID already exists.");
         
         // add objects to mapping stored on chain
         objects[_id].id = _id;
@@ -101,10 +118,16 @@ contract ObjectDataStore
         objects[_id].isSet = true;
 
         // add objects to array stored on chain
-        objectsArray.push
-        (
-            Obj(_id, _objType, _name, _ipfsHash, _parent, _children, true)
-        );
+        objectsArray.push( ObjArray( _id,
+                                        _objType,
+                                        _name,
+                                        _ipfsHash,
+                                        _parent,
+                                        _children
+                                    ));
+
+        // get objectsArray length, subtract 1, that's the new id
+        objects[_id].index = objectsArray.length-1;
 
         // emit event to blockchain
         emit objectCreationEvent
@@ -127,6 +150,15 @@ contract ObjectDataStore
         string children
     );
 
+    // structure of event that will be emitted
+    event objectDeleteEvent
+    (
+        address indexed deletedBy,
+        string id,
+        string objType,
+        string ipfsHash
+    );
+
     // gets an individual object from mapping
     function objectGet(string memory _id) 
                         external 
@@ -136,21 +168,95 @@ contract ObjectDataStore
         return objects[_id];
     }
 
+    // gets an individual object from mapping
+    function objectExists(string memory _id) 
+                        external 
+                        view 
+                        returns(bool)
+    {
+        return objects[_id].isSet;
+    }
+
     // returns entire data set from array
     function objectGetArray() 
                             public 
                             view 
-                            returns(Obj[] memory) 
+                            returns(ObjArray[] memory) 
     {
         return objectsArray;
+    }
+
+    // returns data set from array for specific key
+    function objectGetArrayItem(uint256 _key) 
+                            public 
+                            view
+                            returns
+                            (
+                                string memory,
+                                string memory,
+                                string memory,
+                                string memory,
+                                string memory,
+                                string memory
+                            ) 
+    {
+        return (objectsArray[_key].id,
+                objectsArray[_key].objType,
+                objectsArray[_key].name,
+                objectsArray[_key].ipfsHash,
+                objectsArray[_key].parent,
+                objectsArray[_key].children);
     }
 
     // returns count of all objects
     function objectGetCount() 
                             public 
                             view 
-                            returns(uint) 
+                            returns(uint256) 
     {
         return objectsArray.length;
+    }
+
+    // returns count of array minus 1
+    function objectLastkey() 
+                            public 
+                            view 
+                            returns(uint256) 
+    {
+        return objectsArray.length-1;
+    }
+
+    // delete object
+    // p.s. this pattern is so stupid, but necessary for solidity
+    function removeObject(string memory _obj) 
+                    public
+                    returns (bool)
+    {
+        // find array key of object 
+        uint256 rowToDelete = objects[_obj].index;
+
+        // find key of last item in array
+        uint arrayLastKey = objectLastkey();
+
+        // get values of last key in array
+        ObjArray memory keyToMove = objectsArray[arrayLastKey];
+
+        //move data from last to delete slot
+        objectsArray[rowToDelete] = keyToMove;
+
+        // get id of transplanted object
+        string memory transplant = keyToMove.id;
+
+        // update object with new array location
+        objects[transplant].index = rowToDelete; 
+
+        // delete last item of array
+        objectsArray.pop();
+
+        // reset mapping struct to default values
+        delete objects[_obj];
+
+        // fin
+        return true;
     }
 }
